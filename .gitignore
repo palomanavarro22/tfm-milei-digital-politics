@@ -1,0 +1,19 @@
+# Generated data -- reproducible from the scripts, not source material
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Generated tables
+appendix_tables/*
+!appendix_tables/.gitkeep
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

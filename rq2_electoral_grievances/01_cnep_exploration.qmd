@@ -1,0 +1,760 @@
+---
+title: "CNEP Argentina 2023 — Data Cleaning and Exploration"
+subtitle: "Descriptive analysis"
+author: "Paloma"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    embed-resources: true
+    theme: flatly
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: true
+---
+
+## Setup
+
+```{r}
+#| label: setup
+#| include: true
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(purrr)
+library(here)
+library(knitr)
+library(DataExplorer)
+library(ggplot2)
+library(DT)
+library(scales)
+
+theme_set(theme_minimal(base_size = 11))
+```
+
+# 1. Load raw data
+
+```{r}
+#| label: carga
+
+ruta_cnep <- here::here("data", "raw", "Argentina2023_Fin.xlsx")
+ruta_dic  <- here::here("data", "raw", "diccionario_cnep_argentina2023.csv")
+ruta_list <- here::here("data", "raw", "lista_completa_variables.csv")
+
+cnep   <- read_excel(ruta_cnep)
+dic    <- readr::read_csv(ruta_dic,  show_col_types = FALSE)
+lista  <- readr::read_csv(ruta_list, show_col_types = FALSE)
+
+cat("CNEP dataset:    ", nrow(cnep),  "rows x", ncol(cnep),  "columns\n")
+cat("Dictionary:      ", nrow(dic),   "documented variables\n")
+cat("Full var list:   ", nrow(lista), "variables\n")
+```
+
+# 2. Data cleaning
+
+## 2.1 Undocumented missing code (90)
+
+Seventeen variables carry an undocumented code `90`, confirmed against the official CNEP v5.0 codebook to not correspond to any substantive response category on any of the seventeen scales.
+
+```{r}
+#| label: fix-codigos-na-bloque-a-b
+
+vars_fix_codigo_90 <- c(
+  "A.GovPerf_2", "A.EconSit_2", "A.Respsit_2",
+  "B.DemSat_2", "B.OneParty_2", "B.TrustMedia_2", "C.LRSelf_2",
+  "B.TrustGov_2", "B.PolCompl_2", "B.DontCare_2", "B.DemAuth_2",
+  "E.FamTalk_2", "E.FriendTalk_2",
+  "J.EqualInd_2", "J.OrderLib_2", "J.PrivPub2_2",
+  "B.PolsDefendRich_2"
+)
+
+dic <- dic %>%
+  mutate(codigos_missing = if_else(
+    variable_excel %in% vars_fix_codigo_90 & !str_detect(codigos_missing, "90="),
+    paste0(codigos_missing, ", 90=undocumented code"),
+    codigos_missing
+  ))
+
+readr::write_csv(dic, here::here("data", "raw", "diccionario_cnep_argentina2023.csv"))
+cat(sprintf("%d variables corrected in dictionary (90=undocumented code).\n",
+    length(vars_fix_codigo_90)))
+```
+
+## 2.2 Variable lookup helper
+
+```{r}
+#| label: helper-consulta
+
+consultar <- function(variable, diccionario = dic, lista_completa = lista) {
+  res <- diccionario |> filter(variable_excel == variable)
+
+  if (nrow(res) > 0) {
+    cat("─────────────────────────────────────────────────────────────\n")
+    cat("Variable:    ", res$variable_excel, "\n")
+    cat("Bloque:      ", res$bloque, "\n")
+    cat("Pregunta:    ", res$pregunta, "\n")
+    cat("Opciones:    ", res$opciones, "\n")
+    cat("Missing:     ", res$codigos_missing, "\n")
+    cat("N válidos:   ", res$n_validos, "\n")
+    if (!is.na(res$notas) && nchar(res$notas) > 0) {
+      cat("Notas:       ", res$notas, "\n")
+    }
+    cat("─────────────────────────────────────────────────────────────\n")
+    return(invisible(res))
+  }
+
+  res2 <- lista_completa |> filter(variable == !!variable)
+  if (nrow(res2) > 0) {
+    cat("─────────────────────────────────────────────────────────────\n")
+    cat("Variable:     ", res2$variable, "\n")
+    cat("Bloque:       ", res2$bloque, "\n")
+    cat("Descripción:  ", res2$descripcion, "\n")
+    cat("N válidos:    ", res2$n_validos, "\n")
+    cat("(Not documented in detail — inferred description only)\n")
+    cat("─────────────────────────────────────────────────────────────\n")
+    return(invisible(res2))
+  }
+
+  cat("Variable '", variable, "' not found.\n", sep = "")
+  invisible(NULL)
+}
+
+consultar("B.DontCare_2")
+```
+
+## 2.3 Systematic NA recoding
+
+Distinguishes real NA from structural skip codes (`995=skip`, `995=Other`, `998=No pertenece`), which are substantive categories, not missing data.
+
+```{r}
+#| label: parser-codigos-na
+
+extraer_codigos_na <- function(texto) {
+  if (is.na(texto)) return(numeric(0))
+  if (str_detect(texto, regex("^Sin códigos", ignore_case = TRUE))) return(numeric(0))
+  if (str_detect(texto, regex("^PENDIENTE", ignore_case = TRUE))) return(numeric(0))
+  if (str_detect(texto, regex("^NA si no es", ignore_case = TRUE))) return(numeric(0))
+
+  texto <- str_replace_all(texto, regex("\\d+\\s*=\\s*skip[^,]*", ignore_case = TRUE), "")
+  texto <- str_replace_all(texto, regex("\\d+\\s*=\\s*Other", ignore_case = TRUE), "")
+  texto <- str_replace_all(texto, regex("\\d+\\s*=\\s*No pertenece[^,]*", ignore_case = TRUE), "")
+
+  str_extract_all(texto, "\\b\\d+\\b")[[1]] |> as.numeric() |> unique()
+}
+
+stopifnot(
+  identical(extraer_codigos_na("998=Missing, 999=NS"), c(998, 999)),
+  identical(extraer_codigos_na("Sin códigos NA"), numeric(0)),
+  identical(extraer_codigos_na("995=Other, 998=Missing"), 998),
+  identical(extraer_codigos_na("995=skip"), numeric(0)),
+  identical(extraer_codigos_na("995=skip, 999=NS"), 999),
+  identical(extraer_codigos_na("998=No pertenece, 995=skip"), numeric(0)),
+  identical(extraer_codigos_na("PENDIENTE VERIFICAR: 90, 995, 999"), numeric(0)),
+  identical(extraer_codigos_na(NA_character_), numeric(0))
+)
+```
+
+```{r}
+#| label: aplicar-recodes-na
+
+cnep_crudo <- cnep
+
+auditoria_na <- tibble(
+  variable            = character(),
+  codigos_aplicados   = character(),
+  casos_recodificados = integer()
+)
+
+for (i in seq_len(nrow(dic))) {
+  var_name <- dic$variable_excel[i]
+  if (!var_name %in% names(cnep)) next
+
+  codigos <- extraer_codigos_na(dic$codigos_missing[i])
+  if (length(codigos) == 0) next
+  if (!is.numeric(cnep[[var_name]])) next
+
+  mask <- cnep[[var_name]] %in% codigos
+  n_rec <- sum(mask, na.rm = TRUE)
+
+  if (n_rec > 0) {
+    cnep[[var_name]][mask] <- NA
+    auditoria_na <- bind_rows(auditoria_na, tibble(
+      variable            = var_name,
+      codigos_aplicados   = paste(codigos, collapse = ", "),
+      casos_recodificados = n_rec
+    ))
+  }
+}
+
+cat("NAs in raw data:        ", sum(is.na(cnep_crudo)), "\n")
+cat("NAs after cleaning:     ", sum(is.na(cnep)), "\n")
+cat("New NAs introduced:     ", sum(is.na(cnep)) - sum(is.na(cnep_crudo)), "\n")
+cat("Variables affected:     ", nrow(auditoria_na), "\n")
+```
+
+```{r}
+#| label: auditoria-na
+
+auditoria_na |>
+  arrange(desc(casos_recodificados)) |>
+  head(30) |>
+  knitr::kable(caption = "Top 30 variables recoded to NA")
+```
+
+## 2.4 Systematic search for code 90 elsewhere
+
+Documentation only — no recoding applied here.
+
+```{r}
+#| label: documentar-codigo-90
+
+extraer_todos_los_numeros <- function(texto) {
+  if (is.na(texto)) return(numeric(0))
+  if (str_detect(texto, regex("^Sin códigos", ignore_case = TRUE))) return(numeric(0))
+  str_extract_all(texto, "\\d+")[[1]] |> as.numeric() |> unique()
+}
+
+variables_con_90 <- tibble(
+  variable = character(), bloque = character(), pregunta = character(),
+  opciones_doc = character(), codigos_missing_doc = character(),
+  n_casos_con_90 = integer()
+)
+
+for (i in seq_len(nrow(dic))) {
+  var_name <- dic$variable_excel[i]
+  if (!var_name %in% names(cnep_crudo)) next
+  if (!is.numeric(cnep_crudo[[var_name]])) next
+  if (var_name == "departamentoId") next
+
+  documentados <- union(
+    extraer_todos_los_numeros(dic$codigos_missing[i]),
+    extraer_todos_los_numeros(dic$opciones[i])
+  )
+  if (90 %in% documentados) next
+
+  n_90 <- sum(cnep_crudo[[var_name]] == 90, na.rm = TRUE)
+  if (n_90 == 0) next
+
+  variables_con_90 <- bind_rows(variables_con_90, tibble(
+    variable = var_name, bloque = dic$bloque[i], pregunta = dic$pregunta[i],
+    opciones_doc = dic$opciones[i], codigos_missing_doc = dic$codigos_missing[i],
+    n_casos_con_90 = n_90
+  ))
+}
+
+cat(sprintf("Variables with undocumented code 90: %d\n\n", nrow(variables_con_90)))
+
+variables_con_90 |>
+  arrange(bloque, variable) |>
+  knitr::kable(caption = "Variables with undocumented code 90")
+```
+
+## 2.5 Critical variable checks
+
+```{r}
+#| label: verificacion-critica-na
+
+verificar_na <- function(var) {
+  if (!var %in% names(cnep)) {
+    cat(sprintf("⚠ %s not in dataset.\n", var))
+    return(invisible(NULL))
+  }
+  antes <- sum(is.na(cnep_crudo[[var]]))
+  despues <- sum(is.na(cnep[[var]]))
+  cat(sprintf("%-40s  NA before: %5d  ->  NA after: %5d  (+%d)\n",
+              var, antes, despues, despues - antes))
+}
+
+verificar_na("D.Internet_2")
+verificar_na("D.CamPaper_2")
+verificar_na("D.CamTV_2")
+verificar_na("D.CamRadio_2")
+verificar_na("E.DiscNumber_2")
+verificar_na("H.InfoTest")
+verificar_na("L.SubjClassX")
+verificar_na("L.WorkStat")
+verificar_na("L.WorkStatNew")
+verificar_na("I.PartyContPers_2_8")
+verificar_na("I.PartyContPers_2_9")
+verificar_na("departamentoId")
+verificar_na("F.Aso_Noperteneceaningunax")
+```
+
+## 2.6 Missing georeference flag
+
+19 respondents share NA across all georeference variables and `departamentoId = 998`.
+
+```{r}
+#| label: dummy-sin-georef
+
+cnep <- cnep |> mutate(sin_georreferencia = is.na(region))
+
+cat("Cases without georeference:", sum(cnep$sin_georreferencia), "\n\n")
+
+cnep |>
+  filter(sin_georreferencia) |>
+  count(provincia) |>
+  knitr::kable(caption = "Province of cases without georeference")
+```
+
+## 2.7 Ballotage vote code verification
+
+The `_Fin.xlsx` harmonized coding does not match the original questionnaire (`1=Milei, 2=Massa`). Verified empirically against leader thermometers.
+
+```{r}
+#| label: verificacion-ballotage
+
+cnep |>
+  filter(C.ThermOpp1Leader_2 <= 10, C.ThermGov1Leader_2 <= 10) |>
+  group_by(H.VoteWhichRecent2.Z) |>
+  summarise(
+    n              = n(),
+    therm_milei_md = median(C.ThermOpp1Leader_2),
+    therm_milei_mn = round(mean(C.ThermOpp1Leader_2), 2),
+    therm_massa_md = median(C.ThermGov1Leader_2),
+    therm_massa_mn = round(mean(C.ThermGov1Leader_2), 2),
+    .groups = "drop"
+  ) |>
+  knitr::kable(caption = "Ballotage codes crossed with leader thermometers")
+```
+
+Code `11` -> Milei voters (therm. Milei ≈ 8.7, therm. Massa ≈ 0.5, n ≈ 1,022). Code `1` -> Massa voters (therm. Massa ≈ 7.1, therm. Milei ≈ 0.5, n ≈ 986). Codes `10`/`12`/`13` -> blank/null/abstention. Code `993` -> don't know.
+
+# 3. Save cleaned dataset
+
+```{r}
+#| label: guardar-final
+#| eval: true
+
+dir.create(here::here("data", "processed"), recursive = TRUE, showWarnings = FALSE)
+saveRDS(cnep, here::here("data", "processed", "cnep_argentina2023_limpio.rds"))
+write.csv(auditoria_na, here::here("data", "processed", "auditoria_recodes_na.csv"), row.names = FALSE)
+
+cat("Saved: data/processed/cnep_argentina2023_limpio.rds\n")
+cat(sprintf("Final dimensions: %d rows x %d columns\n", nrow(cnep), ncol(cnep)))
+```
+
+# 4. Descriptive exploration (cleaned data)
+
+## 4.1 Dataset structure
+
+```{r}
+#| label: estructura-general
+
+n_validos <- sapply(cnep, function(x) sum(!is.na(x)))
+
+resumen_general <- tibble(
+  Métrica = c("Rows (respondents)", "Total columns", "Populated columns",
+              "Empty columns", "Dictionary-documented variables",
+              "Inferred-description variables", "Exact duplicate rows"),
+  Valor = c(nrow(cnep), ncol(cnep), sum(n_validos > 0), sum(n_validos == 0),
+            nrow(dic), sum(lista$en_diccionario == "NO"), sum(duplicated(cnep)))
+)
+
+knitr::kable(resumen_general, caption = "Dataset summary")
+```
+
+```{r}
+#| label: cobertura-bloques
+
+lista |>
+  count(bloque, en_diccionario) |>
+  pivot_wider(names_from = en_diccionario, values_from = n, values_fill = 0) |>
+  rename(Documentadas = SI, `Descripción inferida` = NO) |>
+  mutate(Total = Documentadas + `Descripción inferida`) |>
+  arrange(desc(Total)) |>
+  knitr::kable(caption = "Variables by thematic block")
+```
+
+Blocks A-M follow the CNEP comparative framework (A=country situation, B=democracy, C=ideology/party ID, D=media, E=discussion networks, F=associations, H=vote/interest, I=party contacts, J=values, K=electoral integrity, L=demographics, M=Module 6/CSES). Block `z` is Argentine-team administrative variables. Block N (national identity) was not fielded in Argentina.
+
+```{r}
+#| label: introduce
+#| fig-height: 4
+
+DataExplorer::introduce(cnep)
+DataExplorer::plot_intro(cnep, ggtheme = theme_minimal())
+```
+
+`Complete Rows = 0%` reflects questionnaire skip logic, not data quality — conditional questions generate structural NAs by design. `Missing Observations` is the informative indicator here, and already reflects the recoding applied in Section 2.
+
+## 4.2 Variable dictionary
+
+```{r}
+#| label: diccionario-tabla
+
+DT::datatable(
+  dic |> select(variable_excel, bloque, pregunta, opciones,
+                codigos_missing, n_validos, notas),
+  filter = "top",
+  options = list(pageLength = 15, scrollX = TRUE, language = list(url = NULL)),
+  rownames = FALSE,
+  caption  = "CNEP Argentina 2023 dictionary (filterable)"
+)
+```
+
+## 4.3 Sampling weights
+
+```{r}
+#| label: pesos-resumen
+
+pesos <- c("L.WtWithin", "PONDERADOR_FINAL", "L.WtCombined", "A.A.WtCombined",
+           "L.WTACROSS", "pondedad", "pondeduc", "pondregion", "ponajreg",
+           "pondfinal", "pondtotal", "pondtotrunc")
+
+pesos_df <- pesos[pesos %in% names(cnep)]
+cnep |> select(all_of(pesos_df)) |> summary()
+```
+
+```{r}
+#| label: pesos-equivalencias
+
+equiv <- tibble(
+  Comparación = c("L.WtWithin vs PONDERADOR_FINAL", "L.WtCombined vs A.A.WtCombined",
+                  "pondfinal vs PONDERADOR_FINAL", "pondtotal vs PONDERADOR_FINAL"),
+  `Máx diferencia abs` = c(
+    max(abs(cnep$L.WtWithin   - cnep$PONDERADOR_FINAL),  na.rm = TRUE),
+    max(abs(cnep$L.WtCombined - cnep$A.A.WtCombined),    na.rm = TRUE),
+    max(abs(cnep$pondfinal    - cnep$PONDERADOR_FINAL),  na.rm = TRUE),
+    max(abs(cnep$pondtotal    - cnep$PONDERADOR_FINAL),  na.rm = TRUE)
+  )
+) |> mutate(`Idénticos` = ifelse(`Máx diferencia abs` < 1e-9, "SÍ", "NO"))
+
+knitr::kable(equiv, caption = "Weight variable equivalence", digits = 4)
+```
+
+```{r}
+#| label: pesos-distribucion
+#| fig-height: 5
+
+cnep |>
+  select(L.WtWithin, L.WtCombined) |>
+  pivot_longer(everything(), names_to = "Peso", values_to = "Valor") |>
+  ggplot(aes(x = Valor, fill = Peso)) +
+  geom_histogram(bins = 50, alpha = 0.7) +
+  facet_wrap(~ Peso, scales = "free", ncol = 2) +
+  labs(title = "Distribution of the two main weights", x = "Weight value", y = "Frequency") +
+  theme(legend.position = "none")
+```
+
+## 4.4 Demographics
+
+```{r}
+#| label: edad
+
+indicadores_edad <- cnep |>
+  summarise(
+    n_EDAD = sum(!is.na(EDAD)), n_LAge = sum(!is.na(L.Age)),
+    discrepancias = sum(EDAD != L.Age, na.rm = TRUE),
+    n_menores_18 = sum(EDAD < 18, na.rm = TRUE),
+    n_16_17_voto_legal = sum(EDAD >= 16 & EDAD < 18, na.rm = TRUE),
+    n_menores_16 = sum(EDAD < 16, na.rm = TRUE)
+  ) |>
+  pivot_longer(everything(), names_to = "Indicador", values_to = "Valor")
+
+rangos_edad <- tibble(
+  Indicador = c("rango_EDAD", "rango_LAge"),
+  Valor = c(paste(min(cnep$EDAD, na.rm = TRUE), "-", max(cnep$EDAD, na.rm = TRUE)),
+            paste(min(cnep$L.Age, na.rm = TRUE), "-", max(cnep$L.Age, na.rm = TRUE)))
+)
+
+bind_rows(indicadores_edad |> mutate(Valor = as.character(Valor)), rangos_edad) |>
+  knitr::kable(caption = "Age indicators (EDAD vs L.Age)")
+```
+
+```{r}
+#| label: edad-grafico
+#| fig-height: 4
+
+cnep |>
+  ggplot(aes(x = EDAD)) +
+  geom_histogram(binwidth = 2, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = c(16, 18), linetype = "dashed", color = "darkred") +
+  annotate("text", x = 16, y = 200, label = "Legal voting age\n(16)",
+           hjust = -0.1, size = 3, color = "darkred") +
+  labs(title = "Age distribution (EDAD)",
+       subtitle = paste("N =", sum(!is.na(cnep$EDAD)),
+                        "| 16-17:", sum(cnep$EDAD %in% 16:17, na.rm = TRUE),
+                        "| <16:", sum(cnep$EDAD < 16, na.rm = TRUE)),
+       x = "Age", y = "Frequency")
+```
+
+`EDAD` (range 14-90) is the real age including 16-17 year-olds with legal voting rights; used for electoral analysis. `L.Age` filters minors and is not used. 23 respondents under 16 are likely capture errors.
+
+```{r}
+#| label: genero
+
+cnep |> count(SEXO, genero, GÉNERO_NUMÉRICO, L.Gender) |>
+  knitr::kable(caption = "Four gender variable versions crossed")
+```
+
+`genero` (text) identifies the 14 respondents self-identifying as "otro". `SEXO` collapses them into "femenino". `GÉNERO_NUMÉRICO` inverts the coding (1=female, 2=male, 3=other). `L.Gender` (CNEP harmonized) leaves the 14 cases as NA. `genero` for descriptive analysis; `GÉNERO_NUMÉRICO` for models.
+
+```{r}
+#| label: educacion
+
+cnep |> count(nivelEducativo, NIVEL_EDUC_NUMÉRICO) |> knitr::kable()
+```
+
+```{r}
+#| label: geografia
+
+cat("\n--- Province (24 categories + CABA) ---\n")
+cnep |> count(provincia, sort = TRUE) |> print(n = Inf)
+
+cat("\n--- region (6 cat) vs regiones (7 cat) ---\n")
+cnep |>
+  count(region, regiones) |>
+  pivot_wider(names_from = regiones, values_from = n, values_fill = 0) |>
+  knitr::kable()
+
+cat("\n--- tipozona (urban/rural) ---\n")
+cnep |> count(tipozona) |> knitr::kable()
+```
+
+`regiones` distinguishes CABA (n=302) from Buenos Aires province (n=1,347); `region` merges them. `BUENOS_AIRES`/`CENTRO`/`CUYO`/`NEA`/`NOA`/`PATAGONIA` are sub-regions defined only within their region.
+
+```{r}
+#| label: clase
+
+cnep |> count(L.SubjClass) |> knitr::kable()
+```
+
+## 4.5 Media and digital intermediation (Block D)
+
+```{r}
+#| label: canales-tradicionales
+
+cnep |> count(D.CamPaper_2, name = "n_diarios")  |> knitr::kable()
+cnep |> count(D.CamRadio_2, name = "n_radio")    |> knitr::kable()
+cnep |> count(D.CamTV_2,    name = "n_television") |> knitr::kable()
+```
+
+```{r}
+#| label: canales-tradicionales-grafico
+#| fig-height: 5
+
+cnep |>
+  select(D.CamPaper_2, D.CamRadio_2, D.CamTV_2) |>
+  pivot_longer(everything(), names_to = "Canal", values_to = "Días") |>
+  filter(!is.na(Días)) |>
+  mutate(Canal = recode(Canal, D.CamPaper_2 = "Diarios", D.CamRadio_2 = "Radio",
+                        D.CamTV_2 = "Televisión")) |>
+  ggplot(aes(x = factor(Días), fill = Canal)) +
+  geom_bar() +
+  facet_wrap(~ Canal) +
+  labs(title = "Days/week following campaign news",
+       subtitle = "0 = never, 7 = every day",
+       x = "Days/week", y = "Frequency") +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| label: filtro-internet
+
+cnep |>
+  count(D.Internet_2) |>
+  mutate(pct = round(100 * n / sum(n), 1)) |>
+  knitr::kable(caption = "Received/shared campaign info via web/email/social media/SMS?")
+```
+
+Respondents answering "No" (~1,444) skip the platform block and go directly to `D.MediaAgree_2`, producing structural missingness (`995`) in `D.Platform_2_*`.
+
+```{r}
+#| label: plataformas
+
+plataformas_nombre <- c("Email", "SMS", "Facebook", "Twitter", "WhatsApp",
+                        "Instagram", "TikTok", "Otros", "NS")
+
+uso_plataformas <- map_dfr(1:9, function(i) {
+  col <- paste0("D.Platform_2_", i)
+  vals <- cnep[[col]]
+  tibble(plataforma = plataformas_nombre[i], columna = col,
+         n_uso = sum(vals == i, na.rm = TRUE), n_no_uso = sum(vals == 0, na.rm = TRUE),
+         n_skip_995 = sum(vals == 995, na.rm = TRUE),
+         n_otros = sum(!vals %in% c(0, i, 995), na.rm = TRUE))
+})
+
+knitr::kable(uso_plataformas, caption = "Platform use during campaign",
+             format.args = list(big.mark = "."))
+```
+
+```{r}
+#| label: plataformas-grafico
+#| fig-height: 4
+
+uso_plataformas |>
+  filter(plataforma != "NS") |>
+  mutate(pct_uso = round(100 * n_uso / nrow(cnep), 1)) |>
+  ggplot(aes(x = reorder(plataforma, pct_uso), y = pct_uso)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(pct_uso, "%")), hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  ylim(0, max(uso_plataformas$n_uso/nrow(cnep)*100) * 1.15) +
+  labs(title = "Digital platform use during the 2023 campaign",
+       subtitle = paste0("% of N = ", nrow(cnep)), x = NULL, y = "% of respondents")
+```
+
+WhatsApp and Instagram lead (~25% each), Facebook close behind (~24%), Twitter fourth (~9.5%), TikTok last (~7%).
+
+```{r}
+#| label: frecuencia-online
+
+cnep |>
+  filter(D.InterFriends_2 <= 7) |>
+  count(D.InterFriends_2) |>
+  knitr::kable(caption = "Days/week receiving info from known contacts (digital)")
+
+cnep |>
+  filter(D.InterShareFreq_2 <= 7) |>
+  count(D.InterShareFreq_2) |>
+  knitr::kable(caption = "Days/week posting opinions about candidates")
+```
+
+```{r}
+#| label: sesgo-digital-lla
+
+cnep |> count(D.InterBias_2) |>
+  knitr::kable(caption = "Did digital info favor any party?")
+
+cnep |>
+  filter(D.InterBias_2 %in% c(1, 2)) |>
+  count(D.InterPart_2_3) |>
+  knitr::kable(caption = "Among those perceiving bias: did it favor LLA?")
+```
+
+## 4.6 Vote and political interest (Block H)
+
+```{r}
+#| label: voto-distribucion
+
+cat("\n=== Turnout Oct 22 ===\n")
+cnep |> count(H.Turnout) |> knitr::kable()
+
+cat("\n=== Vote Oct 22 (HARMONIZED — collapses opposition) ===\n")
+cnep |> count(H.VoteWhichRecent) |>
+  knitr::kable(caption = "1=Massa/UP, 11=opposition (Milei+Bullrich+others), 993=DK/blank")
+
+cat("\n=== Ballotage vote Nov 19 ===\n")
+cnep |> count(H.VoteWhichRecent2.Z) |>
+  knitr::kable(caption = "See Section 2.7 for verification")
+```
+
+```{r}
+#| label: info-test
+#| fig-height: 4
+
+cnep |> count(H.InfoTest) |>
+  knitr::kable(caption = "Correct answers on political knowledge items (0-4)")
+
+cnep |>
+  filter(!is.na(H.InfoTest)) |>
+  ggplot(aes(x = factor(H.InfoTest))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Political knowledge (0 = none correct, 4 = all correct)",
+       x = "Correct answers", y = "Frequency")
+```
+
+## 4.7 Party identification and thermometers
+
+```{r}
+#| label: party-id
+
+cnep |> count(C.PartyID_2) |> knitr::kable()
+
+cnep |>
+  filter(C.PartyID_2 == 1) |>
+  count(C.PartyIDWhich_2, sort = TRUE) |>
+  knitr::kable(caption = "Party closeness (among those feeling close to a party)")
+```
+
+```{r}
+#| label: termometros-grafico
+#| fig-height: 6
+
+termometros <- c("Massa" = "C.ThermGov1Leader_2", "Milei" = "C.ThermOpp1Leader_2",
+                  "CFK" = "C.ThermGov2Leader_2", "Bullrich" = "C.ThermOpp2Leader_2",
+                  "Kicillof" = "C.ThermGov3Leader_2", "Macri" = "C.ThermOpp3Leader_2",
+                  "Bregman" = "C.ThermOpp6Leader_2", "Villarruel" = "C.ThermOpp8Leader_2")
+
+term_long <- map_dfr(names(termometros), function(lider) {
+  tibble(lider = lider, valor = cnep[[termometros[lider]]])
+}) |> filter(valor <= 10)
+
+term_long |>
+  ggplot(aes(x = valor, fill = lider)) +
+  geom_histogram(binwidth = 1, color = "white") +
+  facet_wrap(~ lider, ncol = 4) +
+  scale_x_continuous(breaks = 0:10) +
+  labs(title = "Leader thermometers (0 = rejection, 10 = affinity)",
+       x = "Thermometer", y = "Frequency") +
+  theme(legend.position = "none")
+```
+
+## 4.8 Missingness on RQ2 variables
+
+```{r}
+#| label: missingness-rq2
+#| fig-height: 6
+
+vars_rq2 <- c(
+  "H.VoteWhichRecent2.Z",
+  "D.Internet_2",
+  "D.Platform_2_3", "D.Platform_2_4", "D.Platform_2_5", "D.Platform_2_6", "D.Platform_2_7",
+  "D.InterFriends_2", "D.InterShareFreq_2", "D.InterBias_2", "D.InterPart_2_3",
+  "D.CamPaper_2", "D.CamRadio_2", "D.CamTV_2",
+  "EDAD", "GÉNERO_NUMÉRICO", "L.Education", "L.SubjClass", "L.Income.Z",
+  "C.LRSelf_2", "H.Interest_2", "H.InfoTest", "A.EconSit_2", "A.Respsit_2",
+  "regiones", "tipozona", "L.WtWithin"
+)
+
+DataExplorer::plot_missing(cnep |> select(any_of(vars_rq2)), ggtheme = theme_minimal())
+```
+
+## 4.9 Complete cases
+
+```{r}
+#| label: casos-completos
+
+cnep_rq2 <- cnep |> select(any_of(vars_rq2))
+
+n_total     <- nrow(cnep_rq2)
+n_completos <- sum(complete.cases(cnep_rq2))
+n_perdidos  <- n_total - n_completos
+
+cat("Total N:                          ", n_total, "\n")
+cat("N with all RQ2 vars non-missing:  ", n_completos,
+    " (", round(100*n_completos/n_total, 1), "%)\n", sep = "")
+cat("N lost to missingness:            ", n_perdidos, "\n\n")
+
+n_ballotage <- sum(cnep$H.VoteWhichRecent2.Z %in% c(1, 11), na.rm = TRUE)
+n_ballotage_completo <- cnep |>
+  filter(H.VoteWhichRecent2.Z %in% c(1, 11)) |>
+  select(any_of(setdiff(vars_rq2, "H.VoteWhichRecent2.Z"))) |>
+  complete.cases() |> sum()
+
+cat("Milei/Massa ballotage subsample:  ", n_ballotage, "\n")
+cat("Complete cases within subsample:  ", n_ballotage_completo, "\n")
+```
+
+# 5. Decisions summary
+
+| Decision | Rationale |
+|----|----|
+| Use `EDAD` (not `L.Age`) | Includes 16-17 year-olds with legal vote |
+| Use `genero` or `GÉNERO_NUMÉRICO` (not `SEXO`) | Captures the "otro" category |
+| Use `regiones` (not `region`) | Distinguishes CABA from BA province |
+| Use `L.WtWithin` (= `PONDERADOR_FINAL`) | Final raking weight |
+| Use `L.Income.Z` (not `L.Income`) | Respects questionnaire codes |
+| Ballotage as DV for RQ2 | First round collapses opposition |
+| Variable-by-variable NA recoding | Generic rule would break cases like `L.WorkStat` (995=Other is substantive) |
+| `cnep_crudo` preserved as backup | Enables before/after comparison |
