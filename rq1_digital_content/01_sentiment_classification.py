@@ -200,6 +200,7 @@ def tabla_A2(df_texto):
             ", ".join(f"{k}: {v}" for k, v in dist_odio.items()),
         ]
     })
+    print(tabla.to_string(index=False))
     apa_table_png(tabla, "Table A.2. Sentiment, emotion, and irony classification — corpus-level distribution",
                   "tableA2_distribucion.png", ancho=11)
 
@@ -223,6 +224,7 @@ def tabla_A4(df_texto):
             f"{100*(~others['texto_insuficiente']).mean():.1f}%",
         ]
     })
+    print(tabla.to_string(index=False))
     apa_table_png(tabla, f'Table A.4. Cross-tabulation of the "others" emotion category (N = {len(others)})',
                   "tableA4_others.png")
 
