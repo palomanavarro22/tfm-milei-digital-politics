@@ -1,23 +1,16 @@
-# =============================================================================
+
 # table_helpers.R
 #
-# Funciones compartidas para generar tablas con estilo APA (gt) y exportarlas
-# como PNG, usadas por los tres scripts de R del repo:
+# This scripts helps generating the tables in APA style and export them in PNG
+# 
+# 
 #   rq1_digital_content/02_engagement_model.R
 #   rq2_electoral_grievances/02_grievance_model.R
 #   rq3_congruence/table1_and_appendix.R
 #
-# Antes estas funciones estaban duplicadas en cada script (con pequeñas
-# diferencias, como el tamaño de fuente). Se consolidan acá en un solo
-# lugar para que un cambio de estilo no tenga que replicarse a mano en
-# tres archivos, y para que ningún script dependa en silencio de que otro
-# ya corrió antes en la misma sesión solo para tener estas funciones
-# disponibles.
-#
-# Cada script de R que las use debe empezar con:
+# Every script that uses this needs to start with:
 #   source("R/table_helpers.R")
-# (asumiendo que R se corre con la raíz del repo como working directory).
-# =============================================================================
+
 
 library(gt)
 library(dplyr)
