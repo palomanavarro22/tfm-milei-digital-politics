@@ -47,6 +47,37 @@ cargar_datos <- function() {
   df_completo
 }
 
+comparar_tweets_excluidos <- function(df_completo) {
+  # Compares the 90 tweets excluded for missing image metadata against
+  # the 360 included, on variables available for both groups -- checks
+  # whether the exclusion looks systematically different (analogous to
+  # the code-90 diagnostic in 02_grievance_model.R for RQ2).
+  # NOTA: asignar el numero de tabla correcto antes de insertar en el
+  # documento final (ver comentario de Javi sobre numeracion).
+  tabla <- df_completo |>
+    mutate(excluido = is.na(tiene_imagen)) |>
+    group_by(excluido) |>
+    summarise(
+      n = n(),
+      engagement_medio = mean(likes + retweets + replies + quotes, na.rm = TRUE),
+      prob_anger_media = mean(prob_anger, na.rm = TRUE),
+      prob_ironic_media = mean(prob_ironic, na.rm = TRUE),
+      largo_texto_medio = mean(nchar(full_text), na.rm = TRUE),
+      dia_medio = mean(dias_desde_inicio, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  cat("Comparacion tweets excluidos (sin metadata de imagen) vs. incluidos:\n")
+  print(tabla)
+
+  apa_table(
+    tabla, "Table A.X. Excluded (missing image metadata) vs. included tweets",
+    "Source: own elaboration. Compares tweets dropped for missing image metadata (N=90) against those retained (N=360), on variables available for both groups."
+  ) |> save_png("tableAX_exclusion_check.png")
+
+  tabla
+}
+
 tabla_A3 <- function(df_completo) {
   # Irony validation: manual coding vs. model classification (Cohen's kappa).
   manual_ironia <- read.csv2("data/raw/muestra_codificacion_manual.csv", stringsAsFactors = FALSE,
@@ -145,6 +176,7 @@ ranking_estandarizado <- function(df, modelo_nb) {
 df_completo <- cargar_datos()
 df <- df_completo |> filter(!is.na(tiene_imagen))
 
+comparar_tweets_excluidos(df_completo)
 tabla_A3(df_completo)
 
 modelo_nb <- modelo_engagement(df)
