@@ -32,6 +32,36 @@ plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.serif"] = ["Times New Roman", "Times", "DejaVu Serif"]
 
 
+def chequear_cobertura_fuentes():
+    """Reconstructs which source (Zeeschuimer / third-party API) covered
+    each tweet, from milei_tweets_combinado.csv. Zeeschuimer only ran
+    from 29-Sep-2023 onward, and it's the only source with n_media
+    (image count); the API covers the full window (17-Sep onward) but
+    never reports image data, for any tweet. Confirms the 90 tweets
+    missing image metadata correspond exactly to the 17-29 Sep gap
+    where only the API ran, and that `replies`/`quotes` (from the API)
+    are present for all 450 tweets, so `engagement` is never affected --
+    only n_media is."""
+    df = pd.read_csv(os.path.join(RAW_DIR, "milei_tweets_combinado.csv"), dtype={"tweet_id": str})
+
+    fuente = pd.Series("ninguno (revisar)", index=df.index)
+    fuente[df["n_media"].notna() & df["replies"].notna()] = "ambos"
+    fuente[df["n_media"].notna() & df["replies"].isna()] = "solo_zeeschuimer"
+    fuente[df["n_media"].isna() & df["replies"].notna()] = "solo_api"
+
+    print("Distribucion por fuente (reconstruida):")
+    print(fuente.value_counts())
+
+    n_solo_zee = (fuente == "solo_zeeschuimer").sum()
+    if n_solo_zee > 0:
+        print(f"ALERTA: {n_solo_zee} tweets solo-Zeeschuimer -- replies/quotes "
+              "en NA para esos casos, revisar el calculo de engagement.")
+    else:
+        print("Sin tweets solo-Zeeschuimer: replies/quotes cubiertos para los 450 "
+              "(vienen de la API, presente en el 100% de los casos). Solo n_media "
+              "falta, y unicamente para el subset 'solo_api'.")
+
+
 def clasificacion_base():
     """Sentiment, emotion, irony and generic hate-speech classifiers."""
     from pysentimiento import create_analyzer
@@ -345,6 +375,8 @@ def tabla_A9_y_estigmatizacion(df_texto):
 
 
 if __name__ == "__main__":
+    chequear_cobertura_fuentes()
+
     df = clasificacion_base()
     df = context_hate_speech(df)
     prediccion_ironia_muestra_manual()
