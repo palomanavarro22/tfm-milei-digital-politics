@@ -8,6 +8,9 @@
 # (data/processed/cnep_argentina2023_limpio.rds), produced by
 # 01_cnep_exploration.qmd. The raw Excel is only read for the code-90
 # exclusion diagnostic.
+#
+# Requires: dplyr, survey, performance (for the VIF check; install with
+# install.packages("performance") -- car::vif() doesn't work on svyglm).
 
 library(dplyr)
 library(survey)
@@ -226,6 +229,27 @@ comparar_completo_vs_solo_redes <- function(modelo_completo, modelo_solo_redes) 
   )
 }
 
+diagnostico_vif <- function(modelo) {
+  # Multicollinearity check among the grievance predictors (Javi's note:
+  # with 16 correlated attitudinal items, ranking by coefficient size
+  # alone can be unstable). Uses performance::check_collinearity(),
+  # which works with svyglm objects -- car::vif() does not. VIF is
+  # scale-invariant, so it doesn't matter that `modelo` here is
+  # unstandardized.
+  resultado <- performance::check_collinearity(modelo)
+  print(resultado)
+
+  tabla <- as.data.frame(resultado) |>
+    transmute(Predictor = Term, VIF = sprintf("%.2f", VIF), Tolerance = sprintf("%.2f", Tolerance))
+
+  apa_table(
+    tabla, "Table A.X. Variance inflation factors (VIF), Model C (social media users)",
+    "Source: own elaboration. VIF > 5 indicates substantial shared variance with other predictors; ranking by coefficient magnitude among such variables should be interpreted with caution."
+  ) |> save_png("tableAX_vif.png")
+
+  tabla
+}
+
 robustez_twitter_vs_indice <- function(cnep) {
   # H2 with Twitter alone instead of the composite index, on the same
   # sample -- checks the null result doesn't depend on how exposure is
@@ -398,6 +422,7 @@ resultado_solo_redes <- modelo_C_social_media(cnep_muestra_comun)
 ranking_rq2 <- ranking_estandarizado_rq2(resultado_solo_redes$muestra, resultado_solo_redes$disenio)
 print(ranking_rq2, row.names = FALSE, digits = 3)
 print(comparar_completo_vs_solo_redes(modelos$C, resultado_solo_redes$modelo), digits = 3)
+diagnostico_vif(resultado_solo_redes$modelo)
 
 robustez <- robustez_twitter_vs_indice(cnep)
 diagnostico_codigo_90()
