@@ -71,9 +71,9 @@ comparar_tweets_excluidos <- function(df_completo) {
   print(tabla)
 
   apa_table(
-    tabla, "Table A.X. Excluded (missing image metadata) vs. included tweets",
+    tabla, "Table A.15. Excluded (missing image metadata) vs. included tweets",
     "Source: own elaboration. Compares tweets dropped for missing image metadata (N=90) against those retained (N=360), on variables available for both groups."
-  ) |> save_png("tableAX_exclusion_check.png")
+  ) |> save_png("tableA15_exclusion_check.png")
 
   tabla
 }
@@ -210,9 +210,9 @@ robustez_tipo_engagement <- function(df) {
   print(tabla)
 
   apa_table(
-    tabla, "Table A.X. Robustness check: affiliative vs. adversarial engagement",
+    tabla, "Table A.16. Robustness check: affiliative vs. adversarial engagement",
     "Source: own elaboration. Affiliative = likes + retweets; adversarial = replies + quotes. *** p<.001, ** p<.01, * p<.05, \u2020 p<.1"
-  ) |> save_png("tableAX_robustez_engagement.png")
+  ) |> save_png("tableA16_robustez_engagement.png")
 
   list(afiliativo = modelo_afiliativo, adversativo = modelo_adversativo, tabla = tabla)
 }
