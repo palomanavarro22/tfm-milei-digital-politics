@@ -1,4 +1,4 @@
-# Digital Politics and Electoral Behavior — Milei 2023
+# Digital Politics and Electoral Behavior: Milei 2023
 
 Reproducible analysis code for the MSc thesis *"Digital Politics and
 Electoral Behavior: Social Media Communication and Electoral Support for
