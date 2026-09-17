@@ -173,6 +173,50 @@ ranking_estandarizado <- function(df, modelo_nb) {
   ranking
 }
 
+robustez_tipo_engagement <- function(df) {
+  # Javi's point: likes+retweets are more affiliative (support), while
+  # replies+quotes can as easily reflect criticism/argument -- especially
+  # likely for anger/irony. Splits engagement into the two types and
+  # re-fits the model on each, to see whether anger/irony predict both
+  # similarly or whether the effect concentrates in one type.
+  df <- df |>
+    mutate(
+      engagement_afiliativo = likes + retweets,
+      engagement_adversativo = replies + quotes
+    )
+
+  modelo_afiliativo <- glm.nb(
+    engagement_afiliativo ~ prob_anger + prob_fear + prob_pos + prob_neg + prob_ironic +
+      tiene_imagen + es_reply + largo_texto + dias_desde_inicio,
+    data = df
+  )
+  modelo_adversativo <- glm.nb(
+    engagement_adversativo ~ prob_anger + prob_fear + prob_pos + prob_neg + prob_ironic +
+      tiene_imagen + es_reply + largo_texto + dias_desde_inicio,
+    data = df
+  )
+
+  vars_contenido <- c("prob_anger", "prob_fear", "prob_pos", "prob_neg", "prob_ironic")
+  extraer_irr <- function(modelo, nombre_col) {
+    tidy(modelo, exponentiate = TRUE) |>
+      filter(term %in% vars_contenido) |>
+      transmute(Predictor = unname(etiquetas_rq1[term]), !!nombre_col := formatear_con_estrellas(estimate, p.value))
+  }
+
+  tabla <- extraer_irr(modelo_afiliativo, "IRR (likes+RT)") |>
+    left_join(extraer_irr(modelo_adversativo, "IRR (replies+quotes)"), by = "Predictor")
+
+  cat(sprintf("N afiliativo=%d, N adversativo=%d\n", nobs(modelo_afiliativo), nobs(modelo_adversativo)))
+  print(tabla)
+
+  apa_table(
+    tabla, "Table A.X. Robustness check: affiliative vs. adversarial engagement",
+    "Source: own elaboration. Affiliative = likes + retweets; adversarial = replies + quotes. *** p<.001, ** p<.01, * p<.05, \u2020 p<.1"
+  ) |> save_png("tableAX_robustez_engagement.png")
+
+  list(afiliativo = modelo_afiliativo, adversativo = modelo_adversativo, tabla = tabla)
+}
+
 df_completo <- cargar_datos()
 df <- df_completo |> filter(!is.na(tiene_imagen))
 
@@ -185,6 +229,8 @@ tabla_A5(modelo_nb)
 
 ranking_rq1 <- ranking_estandarizado(df, modelo_nb)
 print(ranking_rq1, row.names = FALSE, digits = 3)
+
+robustez_engagement <- robustez_tipo_engagement(df)
 
 cat("\n02_engagement_model.R listo. `ranking_rq1`/`etiquetas_rq1` quedan en el entorno --",
     "\nseguir con 02_grievance_model.R y despues table1_and_appendix.R, en la misma sesion.\n")
