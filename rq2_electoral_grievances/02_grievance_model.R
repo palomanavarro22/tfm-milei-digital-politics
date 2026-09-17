@@ -33,13 +33,18 @@ etiquetas_rq2 <- c(
   diarios = "Newspapers", radio = "Radio", tv = "TV", region = "Region", zona = "Zone",
   indice_redes_sociales = "Social media index", uso_twitter = "Twitter/X use",
   econ_pais = "National economy", econ_personal = "Personal economy",
-  desc_gob_saliente = "Outgoing govt. dissatisfaction", confianza_gob = "Government trust",
-  confianza_medios = "Media trust", pols_defienden_ricos = "Politicians favor rich",
-  desc_democracia = "Democracy dissatisfaction", antipluralismo = "Antipluralism",
+  # NOTE: these 8 labels were corrected against the CNEP v5.0 codebook's
+  # actual value labels -- e.g. desc_gob_saliente (A.GovPerf_2) runs
+  # 1=Very dissatisfied...5=Very satisfied, so a HIGH score means
+  # SATISFIED, not dissatisfied. Labels now describe what a high score
+  # means; no data or model coefficients changed, only these strings.
+  desc_gob_saliente = "Satisfaction with outgoing government", confianza_gob = "Government trust",
+  confianza_medios = "Media trust", pols_defienden_ricos = "Disagreement that politicians favor the rich",
+  desc_democracia = "Satisfaction with democracy", antipluralismo = "Pluralist tolerance",
   compromiso_democratico = "Democratic commitment", comprension_pol = "Political understanding",
-  resentimiento_gob = "Political indifference", familia_pol = "Family political talk",
-  amigos_pol = "Friends political talk", equidad_vs_desig = "Equality vs. initiative",
-  orden_vs_libertad = "Order vs. liberties", privado_vs_pub = "Privatization preference",
+  resentimiento_gob = "Perceived government responsiveness", familia_pol = "Family political talk",
+  amigos_pol = "Friends political talk", equidad_vs_desig = "Individual initiative preference",
+  orden_vs_libertad = "Civil liberties preference", privado_vs_pub = "Public ownership preference",
   `(Intercept)` = "Intercept"
 )
 
@@ -243,9 +248,9 @@ diagnostico_vif <- function(modelo) {
     transmute(Predictor = Term, VIF = sprintf("%.2f", VIF), Tolerance = sprintf("%.2f", Tolerance))
 
   apa_table(
-    tabla, "Table A.X. Variance inflation factors (VIF), Model C (social media users)",
+    tabla, "Table A.17. Variance inflation factors (VIF), Model C (social media users)",
     "Source: own elaboration. VIF > 5 indicates substantial shared variance with other predictors; ranking by coefficient magnitude among such variables should be interpreted with caution."
-  ) |> save_png("tableAX_vif.png")
+  ) |> save_png("tableA17_vif.png")
 
   tabla
 }
