@@ -195,7 +195,7 @@ def apa_table_png(tabla_df, titulo, archivo, nota="Source: own elaboration.", an
     ax.axis("off")
 
     tabla = ax.table(cellText=tabla_df.values, colLabels=tabla_df.columns,
-                      cellLoc="left", loc="center", colLoc="left")
+                      cellLoc="left", loc="upper left", colLoc="left")
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(11)
 
