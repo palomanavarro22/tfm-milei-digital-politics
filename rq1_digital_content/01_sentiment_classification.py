@@ -173,11 +173,23 @@ def prediccion_ironia_muestra_manual():
     print(f"Guardado: {ruta} ({len(filas_salida)} tweets)")
 
 
-def apa_table_png(tabla_df, titulo, archivo, nota="Source: own elaboration.", ancho=9):
+def apa_table_png(tabla_df, titulo, archivo, nota="Source: own elaboration.", ancho=None):
     """Renders tabla_df as an APA-style table image: horizontal rules
-    only, bold title, italic source note."""
+    only, bold title, italic source note. `ancho` (figure width, in
+    inches) is computed automatically from the table's actual content
+    when left as None, so narrow tables don't get padded with excess
+    whitespace on the sides -- pass an explicit value only to override."""
     n_filas = len(tabla_df) + 1
     alto = 0.45 * n_filas + 1.0
+
+    if ancho is None:
+        anchos_col = [
+            max([len(str(col))] + [len(str(v)) for v in tabla_df[col]])
+            for col in tabla_df.columns
+        ]
+        ancho_contenido = sum(anchos_col) * 0.10 + 1.0
+        ancho_titulo = len(titulo) * 0.075
+        ancho = max(4.5, min(14, max(ancho_contenido, ancho_titulo)))
 
     fig, ax = plt.subplots(figsize=(ancho, alto))
     ax.axis("off")
@@ -232,7 +244,7 @@ def tabla_A2(df_texto):
     })
     print(tabla.to_string(index=False))
     apa_table_png(tabla, "Table A.2. Sentiment, emotion, and irony classification — corpus-level distribution",
-                  "tableA2_distribucion.png", ancho=11)
+                  "tableA2_distribucion.png")
 
 
 def tabla_A4(df_texto):
@@ -350,7 +362,7 @@ def tabla_A9_y_estigmatizacion(df_texto):
     if filas:
         tabla = pd.DataFrame(filas).sort_values('Generic: "hateful" prob.', ascending=False)
         apa_table_png(tabla, "Table A.9. Hate speech classifier output on group-stigmatizing tweets",
-                      "tableA9_validacion_dirigida.png", ancho=10)
+                      "tableA9_validacion_dirigida.png")
     else:
         print("Table A.9: no se encontraron coincidencias o faltan columnas prob_odio_*.")
 
